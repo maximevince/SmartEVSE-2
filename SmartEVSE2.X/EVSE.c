@@ -130,14 +130,14 @@ unsigned int CalcCurrent();
 
 
 // Configuration settings
-#pragma	config FCMEN = OFF,	IESO = OFF, PRICLKEN = ON
+#pragma	config FCMEN = ON, IESO = ON, PRICLKEN = ON                             // Enable Internal/External Oscillator Switchover
 #pragma config PLLCFG = OFF, FOSC = HSMP                                        // High Speed Medium power (4-16Mhz), PLL Off
 #pragma	config BORV = 285, BOREN = ON, PWRTEN = ON
 #pragma	config WDTPS = 2048, WDTEN = OFF                                        // WDT timeout
 #pragma config CCP2MX = PORTB3, PBADEN = OFF, CCP3MX = PORTC6                   // PortB digital IO
 #pragma config HFOFST = OFF, T3CMX = PORTB5, P2BMX = PORTC0, MCLRE = INTMCLR
 
-#pragma config XINST = OFF, DEBUG = OFF, LVP = OFF, STVREN = ON
+#pragma config XINST = OFF, DEBUG = OFF, LVP = ON, STVREN = ON                  // Allow low voltage programming
 #pragma	config CP0 = OFF, CP1 = OFF, CP2 = OFF, CP3 = OFF, CPD = OFF, CPB = OFF
 #pragma	config WRT0 = OFF, WRT1 = OFF, WRT2 = OFF, WRT3 = OFF
 #pragma	config WRTC = OFF, WRTB = OFF, WRTD = OFF
@@ -146,23 +146,23 @@ unsigned int CalcCurrent();
 
 
 // Text
-const far char StrFixed[]   = "Fixed";
-const far char StrSocket[]  = "Socket";
-const far char StrSmart[]   = "Smart";
-const far char StrNormal[]  = "Normal";
-const far char StrSolar[]   = "Solar";
-const far char StrSolenoid[] = "Solenoid";
-const far char StrMotor[]   = "Motor";
-const far char StrDisabled[] = "Disabled";
-const far char StrLoadBl[9][9]  = {"Disabled", "Master", "Node 1", "Node 2", "Node 3", "Node 4", "Node 5", "Node 6", "Node 7"};
-const far char StrSwitch[5][10] = {"Disabled", "Access B", "Access S", "Sma-Sol B", "Sma-Sol S"};
-const far char StrGrid[2][10] = {"4Wire", "3Wire"};
-const far char StrEnabled[] = "Enabled";
-const far char StrExitMenu[] = "MENU";
-const far char StrMainsAll[] = "All"; // Everything
-const far char StrMainsHomeEVSE[] = "Home+EVSE";
-const far char StrRFIDReader[5][10] = {"Disabled", "Enabled", "Learn", "Delete", "DeleteAll"};
-const far char StrStateName[9][10] = {"A", "B", "C", "D", "COMM_B", "COMM_B_OK", "COMM_C", "COMM_C_OK", "Activate"};
+const char StrFixed[]   = "Fixed";
+const char StrSocket[]  = "Socket";
+const char StrSmart[]   = "Smart";
+const char StrNormal[]  = "Normal";
+const char StrSolar[]   = "Solar";
+const char StrSolenoid[] = "Solenoid";
+const char StrMotor[]   = "Motor";
+const char StrDisabled[] = "Disabled";
+const char StrLoadBl[9][9]  = {"Disabled", "Master", "Node 1", "Node 2", "Node 3", "Node 4", "Node 5", "Node 6", "Node 7"};
+const char StrSwitch[5][10] = {"Disabled", "Access B", "Access S", "Sma-Sol B", "Sma-Sol S"};
+const char StrGrid[2][10] = {"4Wire", "3Wire"};
+const char StrEnabled[] = "Enabled";
+const char StrExitMenu[] = "MENU";
+const char StrMainsAll[] = "All"; // Everything
+const char StrMainsHomeEVSE[] = "Home+EVSE";
+const char StrRFIDReader[5][10] = {"Disabled", "Enabled", "Learn", "Delete", "DeleteAll"};
+const char StrStateName[9][10] = {"A", "B", "C", "D", "COMM_B", "COMM_B_OK", "COMM_C", "COMM_C_OK", "Activate"};
 
 // Global data
 char U1buffer[MODBUS_BUFFER_SIZE], U1packet[MODBUS_BUFFER_SIZE];                // Uart1 Receive buffer /RS485
@@ -463,11 +463,12 @@ void validate_settings(void) {
 
     // Backward compatibility < 2.20
     if (EMConfig[EM_CUSTOM].IRegister == 8 || EMConfig[EM_CUSTOM].URegister == 8 || EMConfig[EM_CUSTOM].PRegister == 8 || EMConfig[EM_CUSTOM].ERegister == 8) {
-        EMConfig[EM_CUSTOM].IsDouble = true;
+        EMConfig[EM_CUSTOM].DataType = MB_DATATYPE_FLOAT32;
         EMConfig[EM_CUSTOM].IRegister = 0;
         EMConfig[EM_CUSTOM].URegister = 0;
         EMConfig[EM_CUSTOM].PRegister = 0;
         EMConfig[EM_CUSTOM].ERegister = 0;
+        EMConfig[EM_CUSTOM].Function = 4;
     }
 }
 
@@ -501,6 +502,7 @@ void read_settings(void) {
     eeprom_read_object(&PVMeter, sizeof PVMeter);
     eeprom_read_object(&PVMeterAddress, sizeof PVMeterAddress);
     eeprom_read_object(&EMConfig[EM_CUSTOM].Endianness, sizeof EMConfig[EM_CUSTOM].Endianness);
+    eeprom_read_object(&EMConfig[EM_CUSTOM].Function, sizeof EMConfig[EM_CUSTOM].Function);
     eeprom_read_object(&EMConfig[EM_CUSTOM].IRegister, sizeof EMConfig[EM_CUSTOM].IRegister);
     eeprom_read_object(&EMConfig[EM_CUSTOM].IDivisor, sizeof EMConfig[EM_CUSTOM].IDivisor);
     eeprom_read_object(&ImportCurrent, sizeof ImportCurrent);
@@ -514,7 +516,7 @@ void read_settings(void) {
     eeprom_read_object(&EMConfig[EM_CUSTOM].PDivisor, sizeof EMConfig[EM_CUSTOM].PDivisor);
     eeprom_read_object(&EMConfig[EM_CUSTOM].ERegister, sizeof EMConfig[EM_CUSTOM].ERegister);
     eeprom_read_object(&EMConfig[EM_CUSTOM].EDivisor, sizeof EMConfig[EM_CUSTOM].EDivisor);
-    eeprom_read_object(&EMConfig[EM_CUSTOM].IsDouble, sizeof EMConfig[EM_CUSTOM].IsDouble);
+    eeprom_read_object(&EMConfig[EM_CUSTOM].DataType, sizeof EMConfig[EM_CUSTOM].DataType);
 
     validate_settings();
 }
@@ -552,6 +554,7 @@ void write_settings(void) {
     eeprom_write_object(&PVMeter, sizeof PVMeter);
     eeprom_write_object(&PVMeterAddress, sizeof PVMeterAddress);
     eeprom_write_object(&EMConfig[EM_CUSTOM].Endianness, sizeof EMConfig[EM_CUSTOM].Endianness);
+    eeprom_write_object(&EMConfig[EM_CUSTOM].Function, sizeof EMConfig[EM_CUSTOM].Function);
     eeprom_write_object(&EMConfig[EM_CUSTOM].IRegister, sizeof EMConfig[EM_CUSTOM].IRegister);
     eeprom_write_object(&EMConfig[EM_CUSTOM].IDivisor, sizeof EMConfig[EM_CUSTOM].IDivisor);
     eeprom_write_object(&ImportCurrent, sizeof ImportCurrent);
@@ -565,7 +568,8 @@ void write_settings(void) {
     eeprom_write_object(&EMConfig[EM_CUSTOM].PDivisor, sizeof EMConfig[EM_CUSTOM].PDivisor);
     eeprom_write_object(&EMConfig[EM_CUSTOM].ERegister, sizeof EMConfig[EM_CUSTOM].ERegister);
     eeprom_write_object(&EMConfig[EM_CUSTOM].EDivisor, sizeof EMConfig[EM_CUSTOM].EDivisor);
-    eeprom_write_object(&EMConfig[EM_CUSTOM].IsDouble, sizeof EMConfig[EM_CUSTOM].IsDouble);
+    eeprom_write_object(&EMConfig[EM_CUSTOM].DataType, sizeof EMConfig[EM_CUSTOM].DataType);
+
 
     unlock55 = 0;                                                               // clear unlock values
     unlockAA = 0;
@@ -671,10 +675,20 @@ void BlinkLed(void) {
     }
 }
 
+#define SET_CURRENT_DELAY_MS (10000)                                             // Only update current setpoint once every 5s (give EV some time to adjust)
+
 void SetCurrent(unsigned int current)                                           // current in Amps*10 (160 = 16A)
 {
+    static unsigned long lastTimeMs = 0;
     unsigned int DutyCycle;
+    
+    if ((Timer - lastTimeMs) < SET_CURRENT_DELAY_MS) { /* careful subtraction, since Timer can overflow */
+        return;
+    }
+    lastTimeMs = Timer;                                                         // Update last time the current setpoint was updated
 
+    printf("\t\t>>> Updating current setpoint: %d.%d A\n", (int)current/10, (int)(current - ((current/10)*10)));
+    
     if ((current >= 60) && (current <= 510)) DutyCycle = (unsigned int) (current / 0.6);
                                                                                 // calculate DutyCycle from current
     else if ((current > 510) && (current <= 800)) DutyCycle = (unsigned int) (current / 2.5) + 640;
@@ -690,7 +704,7 @@ void SetCurrent(unsigned int current)                                           
  * @param unsigned char State
  * @return unsigned char[] Name
  */
-const far unsigned char * getStateName(unsigned char StateCode) {
+const unsigned char * getStateName(unsigned char StateCode) {
     if(StateCode < 9) return StrStateName[StateCode];
     else return "NOSTATE";
 }
@@ -1144,7 +1158,8 @@ unsigned char getMenuItems (void) {
         if (LoadBl < 2) {                                                       // - ? Load Balancing Disabled/Master?
             if (MainsMeter == EM_CUSTOM || PVMeter == EM_CUSTOM || EVMeter == EM_CUSTOM) { // ? Custom electric meter used?
                 MenuItems[m++] = MENU_EMCUSTOM_ENDIANESS;                       // - - Byte order of custom electric meter
-                MenuItems[m++] = MENU_EMCUSTOM_ISDOUBLE;                        // - - Data type of custom electric meter
+                MenuItems[m++] = MENU_EMCUSTOM_DATATYPE;                        // - - Data type of custom electric meter
+                MenuItems[m++] = MENU_EMCUSTOM_FUNCTION;                        // - - Modbus Function of custom electric meter
                 MenuItems[m++] = MENU_EMCUSTOM_UREGISTER;                       // - - Starting register for voltage of custom electric meter
                 MenuItems[m++] = MENU_EMCUSTOM_UDIVISOR;                        // - - Divisor for voltage of custom electric meter
                 MenuItems[m++] = MENU_EMCUSTOM_IREGISTER;                       // - - Starting register for current of custom electric meter
@@ -1246,8 +1261,11 @@ unsigned char setItemValue(unsigned char nav, unsigned int val) {
         case MENU_EMCUSTOM_ENDIANESS:
             EMConfig[EM_CUSTOM].Endianness = val;
             break;
-        case MENU_EMCUSTOM_ISDOUBLE:
-            EMConfig[EM_CUSTOM].IsDouble = val;
+        case MENU_EMCUSTOM_DATATYPE:
+            EMConfig[EM_CUSTOM].DataType = val;
+            break;
+        case MENU_EMCUSTOM_FUNCTION:
+            EMConfig[EM_CUSTOM].Function = val;
             break;
         case MENU_EMCUSTOM_UREGISTER:
             EMConfig[EM_CUSTOM].URegister = val;
@@ -1371,8 +1389,10 @@ unsigned int getItemValue(unsigned char nav) {
             return EVMeterAddress;
         case MENU_EMCUSTOM_ENDIANESS:
             return EMConfig[EM_CUSTOM].Endianness;
-        case MENU_EMCUSTOM_ISDOUBLE:
-            return EMConfig[EM_CUSTOM].IsDouble;
+        case MENU_EMCUSTOM_DATATYPE:
+            return EMConfig[EM_CUSTOM].DataType;
+        case MENU_EMCUSTOM_FUNCTION:
+            return EMConfig[EM_CUSTOM].Function;
         case MENU_EMCUSTOM_UREGISTER:
             return EMConfig[EM_CUSTOM].URegister;
         case MENU_EMCUSTOM_UDIVISOR:
@@ -1425,8 +1445,8 @@ unsigned int getItemValue(unsigned char nav) {
  * @param unsigned char nav
  * @return unsigned char[] MenuItemOption
  */
-const far char * getMenuItemOption(unsigned char nav) {
-    unsigned char Str[10];
+const char * getMenuItemOption(unsigned char nav) {
+    static unsigned char Str[10]; // must be declared static, since it's referenced outside of function scope
     unsigned int value;
 
     value = getItemValue(nav);
@@ -1490,12 +1510,20 @@ const far char * getMenuItemOption(unsigned char nav) {
                 case 1: return "LBF & HWF";
                 case 2: return "HBF & LWF";
                 case 3: return "HBF & HWF";
-                default:
-                    break;
+                default: return "";
             }
-        case MENU_EMCUSTOM_ISDOUBLE:
-            if (value) return "Double";
-            else return "Integer";
+        case MENU_EMCUSTOM_DATATYPE:
+            switch (value) {
+                case MB_DATATYPE_INT16: return "INT16";
+                case MB_DATATYPE_INT32: return "INT32";
+                case MB_DATATYPE_FLOAT32: return "FLOAT32";
+            }
+        case MENU_EMCUSTOM_FUNCTION:
+            switch (value) {
+                case 3: return "3:HoldingReg";
+                case 4: return "4:Input Reg";
+                default: return "";
+            }
         case MENU_EMCUSTOM_UDIVISOR:
         case MENU_EMCUSTOM_IDIVISOR:
         case MENU_EMCUSTOM_PDIVISOR:
@@ -1543,7 +1571,7 @@ void RS232cli(void) {
         for(i = 0; i < MenuItemsCount - 1; i++) {
             if (strcmp(U2buffer, MenuStr[MenuItems[i]].Key) == 0) menu = MenuItems[i];
         }
-        if (strcmp(U2buffer, (const far char *) "STATE?") == 0 ) {              // request charging state for all connected EVSE's
+        if (strcmp(U2buffer, (const char *) "STATE?") == 0 ) {              // request charging state for all connected EVSE's
             menu = MENU_STATE;
         }
     } else if (U2buffer[0] == 0) menu = 0;
@@ -1568,35 +1596,35 @@ void RS232cli(void) {
                 }
                 break;
             case MENU_MODE:
-                if (strcmp(U2buffer, (const far char *) "SOLAR") == 0) {
+                if (strcmp(U2buffer, (const char *) "SOLAR") == 0) {
                     Mode = MODE_SOLAR;
                     write_settings();
-                } else if (strcmp(U2buffer, (const far char *) "SMART") == 0) {
+                } else if (strcmp(U2buffer, (const char *) "SMART") == 0) {
                     Mode = MODE_SMART;
                     write_settings();
-                } else if (strcmp(U2buffer, (const far char *) "NORMAL") == 0) {
+                } else if (strcmp(U2buffer, (const char *) "NORMAL") == 0) {
                     Mode = MODE_NORMAL;
                     write_settings();
                     Error = NO_ERROR; // Clear Errors
                 }
                 break;
             case MENU_LOCK:
-                if (strcmp(U2buffer, (const far char *) "SOLENOID") == 0) {
+                if (strcmp(U2buffer, (const char *) "SOLENOID") == 0) {
                     Lock = 1;
                     write_settings();
-                } else if (strcmp(U2buffer, (const far char *) "MOTOR") == 0) {
+                } else if (strcmp(U2buffer, (const char *) "MOTOR") == 0) {
                     Lock = 2;
                     write_settings();
-                } else if (strcmp(U2buffer, (const far char *) "DISABLE") == 0) {
+                } else if (strcmp(U2buffer, (const char *) "DISABLE") == 0) {
                     Lock = 0;
                     write_settings();
                 }
                 break;
             case MENU_CONFIG:
-                if (strcmp(U2buffer, (const far char *) "FIXED") == 0) {
+                if (strcmp(U2buffer, (const char *) "FIXED") == 0) {
                     Config = 1;
                     write_settings();
-                } else if (strcmp(U2buffer, (const far char *) "SOCKET") == 0) {
+                } else if (strcmp(U2buffer, (const char *) "SOCKET") == 0) {
                     Config = 0;
                     write_settings();
                 }
@@ -1626,10 +1654,10 @@ void RS232cli(void) {
                 }
                 break;
             case MENU_RCMON:
-                if (strcmp(U2buffer, (const far char *) "DISABLE") == 0) {
+                if (strcmp(U2buffer, (const char *) "DISABLE") == 0) {
                     RCmon = 0;
                     write_settings();
-                } else if (strcmp(U2buffer, (const far char *) "ENABLE") == 0) {
+                } else if (strcmp(U2buffer, (const char *) "ENABLE") == 0) {
                     RCmon = 1;
                     write_settings();
                 }
@@ -1645,10 +1673,10 @@ void RS232cli(void) {
                 }
                 break;
             case MENU_MAINSMETERMEASURE:
-                if (strcmp(U2buffer, (const far char *) "ALL") == 0) {
+                if (strcmp(U2buffer, (const char *) "ALL") == 0) {
                     MainsMeterMeasure = 0;
                     write_settings();
-                } else if (strcmp(U2buffer, (const far char *) "HOME") == 0) {
+                } else if (strcmp(U2buffer, (const char *) "HOME") == 0) {
                     MainsMeterMeasure = 1;
                     write_settings();
                 }
@@ -1865,7 +1893,8 @@ void TestIO(void)                                                               
 }
 
 void init(void) {
-    OSCCON = 0b01101100;                                                        // setup external oscillator
+    OSCCON = 0b01111100;                                                        // use "primary clock" (FOSC<3:0> in CONFIG1H),
+                                                                                // Set INTOSC speed = 16 MHz
     OSCCON2 = 0b00000100;                                                       // primary Oscillator On.
 
     RCON = 0b11011111;                                                          // Set Interrupt priority, enable BOR
@@ -1981,7 +2010,7 @@ void UpdateCurrentData(void) {
             SetCurrent(Balanced[0]);
         }
 #ifdef LOG_DEBUG_EVSE
-        printf("\nSTATE: %c Error: %u StartCurrent: -%i ImeasuredNegative: %.1f A ChargeDelay: %u SolarStopTimer: %u NoCurrent: %u Imeasured: %.1f A IsetBalanced: %.1f A", State +'A', Error, StartCurrent,
+        printf("\nSTATE: %c\n\tError: %u\n\tStartCurrent: -%i\n\tImeasuredNegative: %.1f A\n\tChargeDelay: %u\n\tSolarStopTimer: %u\n\tNoCurrent: %u\n\tImeasured: %.1f A\n\tIsetBalanced: %.1f A", State +'A', Error, StartCurrent,
                                                                         (double)ImeasuredNegative/10, ChargeDelay, SolarStopTimer,  NoCurrent,
                                                                         (double)Imeasured/10,
                                                                         (double)IsetBalanced/10);
@@ -2600,7 +2629,7 @@ void main(void) {
                             for (x = 0; x < 3; x++) {
                                 // Calculate difference of Mains and PV electric meter
                                 if (PVMeter) CM[x] = CM[x] - PV[x];             // CurrentMeter and PV resolution are 1mA
-                                Irms[x] = CM[x]/100;                            // reduce resolution of Irms to 100mA
+                                Irms[x] = (int)(CM[x]/100);                     // reduce resolution of Irms to 100mA
                                 Isum = Isum + Irms[x];                          // Isum has a resolution of 100mA
                             }
 
