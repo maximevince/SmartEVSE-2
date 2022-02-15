@@ -314,7 +314,8 @@ void ModbusDecode(unsigned char *buf, unsigned char len) {
         if (!crc16(buf, len)) {
             // CRC OK
 #ifdef LOG_DEBUG_MODBUS
-            printf("\n  valid Modbus packet: Address %02x Function %02x", Modbus.Address, Modbus.Function);
+            printf("\n  valid Modbus packet: Address %02x Function %02x, Len: %d, DL: %d",
+                    Modbus.Address, Modbus.Function, len, Modbus.DataLength);
 #endif
             switch (Modbus.Function) {
                 case 0x03: // (Read holding register)
@@ -329,13 +330,15 @@ void ModbusDecode(unsigned char *buf, unsigned char len) {
                     } else {
                         // Modbus datacount
                         Modbus.DataLength = buf[2];
-                        if (Modbus.DataLength == len - 5) {
+                        // Some SolarEdge might append an extra 00
+                        if (Modbus.DataLength <= len - 5) {
                             // packet length OK
                             // response packet
+                            len = Modbus.DataLength + 5; // fix if length was incorrect
                             Modbus.Type = MODBUS_RESPONSE;
 #ifdef LOG_WARN_MODBUS
                         } else {
-                            printf("\nInvalid modbus FC=04 packet");
+                            printf("\nInvalid modbus FC=%d packet", Modbus.Function);
 #endif
                         }
                     }
