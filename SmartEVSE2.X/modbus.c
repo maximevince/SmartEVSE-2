@@ -338,7 +338,8 @@ void ModbusDecode(unsigned char *buf, unsigned char len) {
                             Modbus.Type = MODBUS_RESPONSE;
 #ifdef LOG_WARN_MODBUS
                         } else {
-                            printf("\nInvalid modbus FC=%d packet", Modbus.Function);
+                            printf("\nInvalid modbus FC=%d packet (len %d != DataLen: %d)",
+                                    Modbus.Function, len, Modbus.DataLength);
 #endif
                         }
                     }
@@ -675,6 +676,11 @@ unsigned char receiveCurrentMeasurement(unsigned char *buf, unsigned char Meter,
                         scalingFactor - 3
                 );
             }
+            
+            // Now send a request for the instantaneous battery power. 2 x 16 bit reg = 1 float value
+            // bat power: ModbusReadInputRequest(MainsMeterAddress, EMConfig[Meter].Function, 0xe174, 2);
+            ModbusReadInputRequest(MainsMeterAddress, EMConfig[Meter].Function, SOLAREDGE_BATTERY_P_ADDR, 2 + 16); // P -> SoC
+
             break;
         }
         default:

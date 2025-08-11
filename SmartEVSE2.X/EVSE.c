@@ -115,6 +115,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <string.h>
 #include <xc.h>
 
@@ -208,6 +209,10 @@ unsigned int OverrideCurrent = 0;                                               
 signed int Imeasured = 0;                                                       // Max of all Phases (Amps *10) of mains power
 signed int ImeasuredNegative = 0;                                               // Max of all Phases (Amps *10) of generated surplus power (negative)
 signed int Isum = 0;                                                            // Sum of all measured Phases (Amps *10) (can be negative)
+
+signed int Ibat_per_phase = 0;  // Ibat per phase; > 0 charge, < 0 discharge
+unsigned char bat_soc_pct = 100; // Battery charge in percentage
+
 
 // Load Balance variables
 signed int IsetBalanced = 0;                                                    // Max calculated current (Amps *10) available for all EVSE's
@@ -675,9 +680,34 @@ void BlinkLed(void) {
     }
 }
 
+#define SET_CURRENT_DELAY_MS (10000)                                             // Only update current setpoint once every 5s (give EV some time to adjust)
+
 void SetCurrent(unsigned int current)                                           // current in Amps*10 (160 = 16A)
 {
+    static unsigned long lastTimeMs = 0;
     unsigned int DutyCycle;
+    
+    static signed long current_avg_x8 = 0;
+    
+    // BUG: always > 0, since current is unsigned!
+    if (current > 0) {
+        current_avg_x8 = current_avg_x8 - (current_avg_x8+4)/8 + current;
+    } else {
+        current_avg_x8 = current_avg_x8 - (current_avg_x8-4)/8 + current;    
+    }
+    current = current_avg_x8 / 8;
+
+#if 0
+    /* single phase -> three phase current target */
+    current = current / 3;
+
+    if ((Timer - lastTimeMs) < SET_CURRENT_DELAY_MS) { /* careful subtraction, since Timer can overflow */
+        return;
+    }
+    lastTimeMs = Timer;                                                         // Update last time the current setpoint was updated
+#endif
+
+    printf("\t\t>>> Updating current setpoint: %d.%d A\n", (int)current/10, (int)(current - ((current/10)*10)));
 
     if ((current >= 60) && (current <= 510)) DutyCycle = (unsigned int) (current / 0.6);
                                                                                 // calculate DutyCycle from current
@@ -844,12 +874,19 @@ void CalcBalancedCurrent(char mod) {
         #endif
         IsumImport = Isum - (signed int)(10 * ImportCurrent);                   // Allow Import of power from the grid when solar charging
 
+        printf("\n>>> Isum: %d, IsumImport: %d, IsetBalanced: %d",
+                Isum, IsumImport, IsetBalanced);
         if (IsumImport < 0)                                                     // If it's negative, we have surplus (solar) power available
         {
-            if (IsumImport < -10) IsetBalanced = IsetBalanced - (IsumImport / 3); //IsetBalanced + 5; // still more then 1A available, increase Balanced charge current with 0.5A
-            else IsetBalanced = IsetBalanced - (IsumImport / 4);                // less then 1A difference, increase with 1/4th of difference.
+            if (IsumImport < -10) {
+                //XXX FIXME: this keeps increasing IsetBalanced
+                IsetBalanced = IsetBalanced - (IsumImport / 3); //IsetBalanced + 5; // still more then 1A available, increase Balanced charge current with 0.5A
+            } else { 
+                IsetBalanced = IsetBalanced - (IsumImport / 4);                // less then 1A difference, increase with 1/4th of difference.
+            }
         } else IsetBalanced = IsetBalanced - (IsumImport / 2);                  // Positive, decrease Balanced charge current.
                                                                                 // If IsetBalanced is below MinCurrent or negative, make sure it's set to MinCurrent.
+        
         if ( (IsetBalanced < (BalancedLeft * MinCurrent * 10)) || (IsetBalanced < 0) ) {
             IsetBalanced = BalancedLeft * MinCurrent * 10;
                                                                                 // ----------- Check to see if we have to continue charging on solar power alone ----------
@@ -1562,6 +1599,17 @@ void RS232cli(void) {
         if (strcmp(U2buffer, (const char *) "STATE?") == 0 ) {                  // request charging state for all connected EVSE's
             menu = MENU_STATE;
         }
+        else if (strcmp(U2buffer, (const char *) "SOLAR") == 0 ) {              // shortcut to switch to SOLAR mode
+            Mode = MODE_SOLAR;
+            write_settings();
+        }
+        else if (strcmp(U2buffer, (const char *) "NORMAL") == 0 ) {             // shortcut to switch to NORMAL mode
+            Mode = MODE_NORMAL;
+            write_settings();
+            Error = NO_ERROR; // Clear Errors
+        }
+
+
     } else if (U2buffer[0] == 0) menu = 0;
     else {
         switch (menu) {
@@ -1997,11 +2045,8 @@ void UpdateCurrentData(void) {
             SetCurrent(Balanced[0]);
         }
 #ifdef LOG_DEBUG_EVSE
-        printf("\nSTATE: %c Error: %u StartCurrent: -%i ImeasuredNegative: %.1f A ChargeDelay: %u SolarStopTimer: %u NoCurrent: %u Imeasured: %.1f A IsetBalanced: %.1f A", State +'A', Error, StartCurrent,
-                                                                        (double)ImeasuredNegative/10, ChargeDelay, SolarStopTimer,  NoCurrent,
-                                                                        (double)Imeasured/10,
-                                                                        (double)IsetBalanced/10);
-
+        printf("\nError: %u StartCurrent: -%i ImeasuredNegative: %.1f A ChargeDelay: %u SolarStopTimer: %u NoCurrent: %u Imeasured: %.1f A IsetBalanced: %.1f A",
+                    Error, StartCurrent, (double)ImeasuredNegative/10, ChargeDelay, SolarStopTimer,  NoCurrent, (double)Imeasured/10, (double)IsetBalanced/10);
         printf("\nL1: %.1f A L2: %.1f A L3: %.1f A Isum: %.1f A", (double)Irms[0]/10, (double)Irms[1]/10, (double)Irms[2]/10, (double)Isum/10);
 #endif
     } else Imeasured = 0; // In case Sensorbox is connected in Normal mode. Clear measurement.
@@ -2495,6 +2540,7 @@ void main(void) {
 
         // Every 2 seconds, request measurements from modbus meters
         if (ModbusRequest && ModbusTimer >= 100 ) {
+            printf("\nState: %c", State +'A'); // Print the current J1772 state
 #ifdef LOG_INFO_MODBUS
             printf("\nModbusRequest %u", ModbusRequest);
 #endif
@@ -2606,11 +2652,22 @@ void main(void) {
                             // packet from PV electric meter
                             receiveCurrentMeasurement(Modbus.Data, PVMeter, PV);
 
+                        } else if (Modbus.Address == MainsMeterAddress && Modbus.Register == SOLAREDGE_BATTERY_P_ADDR) {
+                            // packet from SolarEdge: instantaneous battery power
+                            //printf("\n>>> %d bytes from Battery", Modbus.DataLength);
+                            signed long batpower_w = receiveMeasurement(Modbus.Data, 0, ENDIANESS_HBF_LWF, MB_DATATYPE_FLOAT32, 0);
+                            Ibat_per_phase = (int)((batpower_w * 10) / 230 / 3); // Amps * 10
+                            printf("\n>>> batpower %d W -> I_per_phase: %d (x 0.1 A)", (int) batpower_w, Ibat_per_phase);
+
+                            signed long bat_soc = receiveMeasurement(Modbus.Data, 8, ENDIANESS_HBF_LWF, MB_DATATYPE_FLOAT32, 0);
+                            bat_soc_pct = (unsigned char)bat_soc;
+                            printf("\n>>> bat_pct %d (%d min)", (int) bat_soc_pct, SOLAREDGE_BATTERY_SOC_MIN);
+                            
                         } else if (Modbus.Address == MainsMeterAddress && Modbus.Register == EMConfig[MainsMeter].IRegister) {
                             // packet from Mains electric meter
                             x = receiveCurrentMeasurement(Modbus.Data, MainsMeter, CM);
                             if (x && LoadBl <2) timeout = 10;                   // only reset timeout when data is ok, and Master/Disabled
-
+                            
                             // Calculate Isum (for nodes and master)
                             Isum = 0;
                             for (x = 0; x < 3; x++) {
@@ -2619,7 +2676,19 @@ void main(void) {
                                 Irms[x] = (signed int)(CM[x] / 100);            // reduce resolution of Irms to 100mA
                                 Isum = Isum + Irms[x];                          // Isum has a resolution of 100mA
                             }
-
+                            
+                            // Adjust with power from/to battery
+                            // Only in case the battery is discharging,
+                            // or when the battery is charging and Soc > 50
+                            printf("\n>> Isum(no bat): %d (x 0.1A)", (int)Isum);
+                            if ((Ibat_per_phase < 0) || (bat_soc_pct >= SOLAREDGE_BATTERY_SOC_MIN)) {
+                                Isum = Isum - (3 * Ibat_per_phase);
+                            }
+                            printf("\n>> Isum(/w bat): %d (x 0.1A)", (int)Isum);
+                            
+                            //printf("\n>>> Imains: %d, %d, %d (mA)",
+                            //        (int)CM[0], (int)CM[1], (int)CM[2]);
+                            
                         } else if (EVMeter && Modbus.Address == EVMeterAddress && Modbus.Register == EMConfig[EVMeter].ERegister) {
                             // packet from EV kWh meter
                             EnergyEV = receiveEnergyMeasurement(Modbus.Data, EVMeter);
@@ -2641,7 +2710,7 @@ void main(void) {
                 }
             // Data received is a request from the master to a device on the bus.
             } else if (Modbus.Type == MODBUS_REQUEST) {
-                //printf("\nModbus Request Address %i / Function %02x / Register %02x",Modbus.Address,Modbus.Function,Modbus.Register);
+                printf("\nModbus Request Address %i / Function %02x / Register %02x",Modbus.Address,Modbus.Function,Modbus.Register);
                                                                                 // No timeout reset here, as it is a request, no response!!!!
                 // Special TestIO message?
                 if (Modbus.Address == 0x0a && Modbus.Function == 0x06 && Modbus.Register == 0xa8 && Modbus.Value == 0x494f && !TestState) {
@@ -2686,7 +2755,9 @@ void main(void) {
 #endif
 #ifdef LOG_WARN_MODBUS
             } else {
-                printf("\nCRC invalid\n");
+                if (Modbus.DataLength) {
+                    printf("\nCRC invalid (%d bytes)", Modbus.DataLength);
+                }
 #endif
             }
         } // (ISRFLAG > 1) 	 complete packet detected?

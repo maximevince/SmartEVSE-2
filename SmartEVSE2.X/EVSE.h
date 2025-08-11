@@ -29,12 +29,12 @@
 
 #define _XTAL_FREQ 16000000L                                                    // 16Mhz Xtal frequency
 
-#define LOG_DEBUG 3                                                             // Debug messages including measurement data
-#define LOG_INFO 2                                                              // Information messages without measurement data
-#define LOG_WARN 1                                                              // Warning or error messages
-#define LOG_OFF 0
+#define LOG_DEBUG (3)                                                             // Debug messages including measurement data
+#define LOG_INFO  (2)                                                              // Information messages without measurement data
+#define LOG_WARN  (1)                                                              // Warning or error messages
+#define LOG_OFF   (0)
 
-#define LOG_EVSE LOG_INFO                                                       // Default: LOG_INFO
+#define LOG_EVSE LOG_DEBUG                                                      // Default: LOG_INFO
 #define LOG_MODBUS LOG_WARN                                                     // Default: LOG_WARN
 
 #define VERSION "2.20"                                                          // SmartEVSE software version
@@ -49,10 +49,10 @@
 #define MAX_MAINS 25                                                            // max Current the Mains connection can supply
 #define MAX_CURRENT 13                                                          // max charging Current for the EV
 #define MIN_CURRENT 6                                                           // minimum Current the EV will accept
-#define MODE 0                                                                  // Normal EVSE mode
+#define MODE MODE_SOLAR                                                                  // Normal EVSE mode
 #define LOCK 0                                                                  // No Cable lock
 #define MAX_CIRCUIT 16                                                          // Max current of the EVSE circuit breaker
-#define CONFIG 0                                                                // Configuration: 0= TYPE 2 socket, 1= Fixed Cable
+#define CONFIG 1                                                                // Configuration: 0= TYPE 2 socket, 1= Fixed Cable
 #define LOADBL 0                                                                // Load Balancing disabled
 #define SWITCH 0                                                                // 0= Charge on plugin, 1= (Push)Button on IO2 is used to Start/Stop charging.
 #define RC_MON 0                                                                // Residual Current Monitoring on IO3. Disabled=0, RCM14=1
@@ -61,7 +61,7 @@
 #define START_CURRENT 4                                                         // Start charging when surplus current on one phase exceeds 4A (Solar)
 #define STOP_TIME 10                                                            // Stop charging after 10 minutes at MIN charge current (Solar)
 #define IMPORT_CURRENT 0                                                        // Allow the use of grid power when solar charging (Amps)
-#define MAINS_METER 1                                                           // Mains Meter, 1= Sensorbox, 2=Phoenix, 3= Finder, 4= Eastron, 5=Custom
+#define MAINS_METER 6                                                           // Mains Meter, 1= Sensorbox, 2=Phoenix, 3= Finder, 4= Eastron, 5=ABB, 6=SolarEdge, 7=Custom
 #ifdef SPECIAL
 #define GRID 1                                                                  // Grid, 0= 4-Wire CW, 1= 4-Wire CCW, 2= 3-Wire CW, 3= 3-Wire CCW
 #else
@@ -266,6 +266,10 @@
 #define ENDIANESS_HBF_LWF 2
 #define ENDIANESS_HBF_HWF 3
 
+#define SOLAREDGE_BATTERY_P_ADDR   0xe174  // Single 32bit float containing total instantaneous battery power in W
+#define SOLAREDGE_BATTERY_SOC_ADDR 0xe184  // Single 32bit float containing State-of-Charge / State-of-Energy in %
+#define SOLAREDGE_BATTERY_SOC_MIN  (80)    // Minimum SoC before charging the EV in Solar Mode
+
 typedef enum mb_datatype {
     MB_DATATYPE_INT32 = 0,
     MB_DATATYPE_FLOAT32 = 1,
@@ -406,6 +410,9 @@ struct {
     unsigned char PDivisor; // 10^x
     unsigned int ERegister; // Total energy (kWh)
     unsigned char EDivisor; // 10^x
+    //XXX: add battery power register?
+    //unsigned int BatPRegister; // Single phase current (A)
+    //unsigned char BatPDivisor; // 10^x
 } EMConfig[EM_CUSTOM + 1] = {
     /* DESC,      ENDIANNESS,      FCT, DATATYPE,            U_REG,DIV, I_REG,DIV, P_REG,DIV, E_REG,DIV */
     {"Disabled",  ENDIANESS_LBF_LWF, 0, MB_DATATYPE_INT32,        0, 0,      0, 0,      0, 0,      0, 0}, // First entry!
@@ -414,7 +421,7 @@ struct {
     {"Finder",    ENDIANESS_HBF_HWF, 4, MB_DATATYPE_FLOAT32, 0x1000, 0, 0x100E, 0, 0x1026, 0, 0x1106, 3}, // Finder 7E.78.8.400.0212 (V / A / W / Wh) max read count 127
     {"Eastron",   ENDIANESS_HBF_HWF, 4, MB_DATATYPE_FLOAT32,    0x0, 0,    0x6, 0,   0x34, 0,  0x156, 0}, // Eastron SDM630 (V / A / W / kWh) max read count 80
     {"ABB",       ENDIANESS_HBF_HWF, 3, MB_DATATYPE_INT32,   0x5B00, 1, 0x5B0C, 2, 0x5B14, 2, 0x5002, 2}, // ABB B23 212-100 (0.1V / 0.01A / 0.01W / 0.01kWh) RS485 wiring reversed / max read count 125
-    {"SolarEdge", ENDIANESS_HBF_HWF, 3, MB_DATATYPE_INT16,    40196, 0,  40191, 0,  40083, 0,  40226, 3}, // SolarEdge SunSpec (0.01V (16bit) / 0.1A (16bit) / 1W (16bit) / 1 Wh (32bit))
+    {"SolarEdge", ENDIANESS_HBF_LWF, 3, MB_DATATYPE_INT16,    40196, 0,  40191, 0,  40083, 0,  40226, 3}, // SolarEdge SunSpec (0.01V (16bit) / 0.1A (16bit) / 1W (16bit) / 1 Wh (32bit))
     {"Custom",    ENDIANESS_LBF_LWF, 4, MB_DATATYPE_INT32,        0, 0,      0, 0,      0, 0,      0, 0}  // Last entry!
 };
 
