@@ -37,7 +37,7 @@
 #define LOG_EVSE LOG_INFO                                                       // Default: LOG_INFO
 #define LOG_MODBUS LOG_WARN                                                     // Default: LOG_WARN
 
-#define VERSION "2.20"                                                          // SmartEVSE software version
+#define VERSION "2.21-vnz"                                                      // SmartEVSE software version
 #define TRANSFORMER_COMP 100                                                    // Current calculation compensation option for use with 230V-400V transformers,
                                                                                 // where the primary (MAINS) current is 1.73 times the secondary (EVSE) current.
                                                                                 // set to 100 for normal use, and to 173 for use with a transformer.
@@ -47,12 +47,12 @@
 
 #define ICAL 1024                                                               // Irms Calibration value (for Current transformers)
 #define MAX_MAINS 25                                                            // max Current the Mains connection can supply
-#define MAX_CURRENT 13                                                          // max charging Current for the EV
+#define MAX_CURRENT 16                                                          // max charging Current for the EV
 #define MIN_CURRENT 6                                                           // minimum Current the EV will accept
 #define MODE 0                                                                  // Normal EVSE mode
 #define LOCK 0                                                                  // No Cable lock
 #define MAX_CIRCUIT 16                                                          // Max current of the EVSE circuit breaker
-#define CONFIG 0                                                                // Configuration: 0= TYPE 2 socket, 1= Fixed Cable
+#define CONFIG 1                                                                // Configuration: 0= TYPE 2 socket, 1= Fixed Cable
 #define LOADBL 0                                                                // Load Balancing disabled
 #define SWITCH 0                                                                // 0= Charge on plugin, 1= (Push)Button on IO2 is used to Start/Stop charging.
 #define RC_MON 0                                                                // Residual Current Monitoring on IO3. Disabled=0, RCM14=1
@@ -61,7 +61,7 @@
 #define START_CURRENT 4                                                         // Start charging when surplus current on one phase exceeds 4A (Solar)
 #define STOP_TIME 10                                                            // Stop charging after 10 minutes at MIN charge current (Solar)
 #define IMPORT_CURRENT 0                                                        // Allow the use of grid power when solar charging (Amps)
-#define MAINS_METER 0                                                           // Mains Meter, 1= Sensorbox, 2=Phoenix, 3= Finder, 4= Eastron, 5 = ABB, 6= SolarEdge, 7= Custom
+#define MAINS_METER 0                                                           // Mains Meter, 1= Sensorbox, 2=Phoenix, 3= Finder, 4= Eastron, 5 = ABB, 6= SolarEdge, 7= B+G WS100, 8= Custom
 #ifdef SPECIAL
 #define GRID 1                                                                  // Grid, 0= 4-Wire CW, 1= 4-Wire CCW, 2= 3-Wire CW, 3= 3-Wire CCW
 #else
@@ -71,8 +71,8 @@
 #define MAINS_METER_MEASURE 0
 #define PV_METER 0
 #define PV_METER_ADDRESS 11
-#define EV_METER 0
-#define EV_METER_ADDRESS 12
+#define EV_METER 7
+#define EV_METER_ADDRESS 10
 #define MIN_METER_ADDRESS 10
 #define MAX_METER_ADDRESS 247
 #define EMCUSTOM_ENDIANESS 0
@@ -259,7 +259,8 @@
 #define EM_EASTRON 4
 #define EM_ABB 5
 #define EM_SOLAREDGE 6
-#define EM_CUSTOM 7
+#define EM_BG_ETECH_WS100 7
+#define EM_CUSTOM 8
 
 #define ENDIANESS_LBF_LWF 0
 #define ENDIANESS_LBF_HWF 1
@@ -417,6 +418,7 @@ struct {
     {"ABB",       ENDIANESS_HBF_HWF, 3, MB_DATATYPE_INT32,   0x5B00, 1, 0x5B0C, 2, 0x5B14, 2, 0x5002, 2}, // ABB B23 212-100 (0.1V / 0.01A / 0.01W / 0.01kWh) RS485 wiring reversed / max read count 125
     {"SolarEdge", ENDIANESS_HBF_HWF, 3, MB_DATATYPE_INT16,    40196, 0,  40191, 0,  40083, 0,  40226, 3}, // SolarEdge SunSpec (0.01V (16bit) / 0.1A (16bit) / 1W  (16bit) / 1 Wh (32bit))
                                                                                                           // Cannot be used for EV power measurement -> PRegiser is set to PV power
+    {"WS100",     ENDIANESS_HBF_HWF, 4, MB_DATATYPE_INT32,    0x100, 0,  0x102, 3,  0x104, 0,  0x10E, 2}, // B+G E-tech WS100 (V / A / W / kWh*100) - single phase modbus meter (alt energy: 0x122)
     {"Custom",    ENDIANESS_LBF_LWF, 4, MB_DATATYPE_INT32,        0, 0,      0, 0,      0, 0,      0, 0}  // Last entry!
 };
 

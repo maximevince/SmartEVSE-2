@@ -197,6 +197,7 @@ unsigned char EVMeterAddress = EV_METER_ADDRESS;
 unsigned char RFIDReader = RFID_READER;                                         // RFID Reader Disabled/Enabled (Learn / Delete, Delete All)
 
 signed int Irms[3]={0, 0, 0};                                                   // Momentary current per Phase (23 = 2.3A) (resolution 100mA)
+signed long I_EV[3]={0, 0, 0};                                                  // Momentary EV Meter current per Phase
                                                                                 // Max 3 phases supported
 unsigned char State = STATE_A;
 unsigned char Error = NO_ERROR;
@@ -264,6 +265,7 @@ unsigned int Iuncal = 0;                                                        
 
 unsigned int SolarStopTimer = 0;
 unsigned char DelayedRS485SendBuf = 0;
+signed long EnergyEV = 0;                                                       // latest EV Wh meter value
 signed long EnergyCharged = 0;                                                  // kWh meter value energy charged. (Wh) (will reset if state changes from A->B)
 signed long EnergyMeterStart = 0;                                               // kWh meter value is stored once EV is connected to EVSE (Wh)
 signed long PowerMeasured = 0;                                                  // Measured Charge power in Watt by kWh meter
@@ -449,8 +451,8 @@ void validate_settings(void) {
     if (Switch != 1 && Switch != 2) Access_bit = 1;
     // Sensorbox v2 has always address 0x0A
     if (MainsMeter == EM_SENSORBOX) MainsMeterAddress = 0x0A;
-    // Disable modbus reception on normal mode
-    if (Mode == MODE_NORMAL) { MainsMeter = 0; PVMeter = 0; }
+    // Note: Modbus meter data is now requested in all modes, but only used for current calculations in Smart/Solar mode
+    // if (Mode == MODE_NORMAL) { MainsMeter = 0; PVMeter = 0; }
     // Disable PV reception if not configured
     if (MainsMeterMeasure == 0) PVMeter = 0;
     // set Lock variables for Solenoid or Motor
@@ -1558,12 +1560,45 @@ void RS232cli(void) {
     printf("\n");
     if (menu == 0)                                                              // menu = Main Menu
     {
+        // Check for HELP command first
+        if (strcmp(U2buffer, (const char *) "HELP") == 0 || strcmp(U2buffer, (const char *) "help") == 0) {
+            // Show full menu for HELP command
+            printf("\n----------------------------- SMART EVSE -----------------------------\n v");
+            printf(VERSION);
+            printf(" for instructions, see www.smartevse.org\n");
+            printf(" Internal Temperature: %i C  SN: %06u\n", TempEVSE, serialnr);
+            printf("----------------------------------------------------------------------\n");
+            for(i = 0; i < MenuItemsCount - 1; i++) {
+                printf("%-07s - %-50s - ", MenuStr[MenuItems[i]].Key, MenuStr[MenuItems[i]].Desc);
+                if (MenuItems[i] == MENU_CAL) {
+                    for (x = 0 ; x < 3 ; x++)
+                        printf("CT%u:%d.%u A ", x+1, Irms[x]/10, (unsigned int)abs(Irms[x])%10 );
+                } else {
+                    printf(getMenuItemOption(MenuItems[i]));
+                }
+                printf("\n");
+            }
+            printf("\n>");
+            return;
+        }
+
         for(i = 0; i < MenuItemsCount - 1; i++) {
             if (strcmp(U2buffer, MenuStr[MenuItems[i]].Key) == 0) menu = MenuItems[i];
         }
         if (strcmp(U2buffer, (const char *) "STATE?") == 0 ) {              // request charging state for all connected EVSE's
             menu = MENU_STATE;
         }
+        else if (strcmp(U2buffer, (const char *) "SOLAR") == 0 ) {              // shortcut to switch to SOLAR mode
+            Mode = MODE_SOLAR;
+            write_settings();
+        }
+        else if (strcmp(U2buffer, (const char *) "NORMAL") == 0 ) {             // shortcut to switch to NORMAL mode
+            Mode = MODE_NORMAL;
+            write_settings();
+            Error = NO_ERROR; // Clear Errors
+        }
+
+
     } else if (U2buffer[0] == 0) menu = 0;
     else {
         switch (menu) {
@@ -1696,23 +1731,16 @@ void RS232cli(void) {
 
     switch (menu) {
         case 0:
-            printf("\n----------------------------- SMART EVSE -----------------------------\n v");
-            printf(VERSION);
-            printf(" for instructions, see www.smartevse.org\n");
-            printf(" Internal Temperature: %i C  SN: %06u\n", TempEVSE, serialnr);
-            printf("----------------------------------------------------------------------\n");
-            for(i = 0; i < MenuItemsCount - 1; i++) {
-                printf("%-07s - %-50s - ", MenuStr[MenuItems[i]].Key, MenuStr[MenuItems[i]].Desc);
-                if (MenuItems[i] == MENU_CAL) {
-                    for (x = 0 ; x < 3 ; x++)
-                        printf("CT%u:%d.%u A ", x+1, Irms[x]/10, (unsigned int)abs(Irms[x])%10 );
-                } else {
-                    printf(getMenuItemOption(MenuItems[i]));
-                }
-                printf("\n");
+            // Show status only
+            printf("\n");
+            printf("STATE: %c\n", State +'A');
+            printf("EV_CURRENT_MA: %li, %li, %li\n", I_EV[0], I_EV[1], I_EV[2]);
+            if (EnergyEV > 0) {
+                printf("EV_ENERGY_WH: %li\n", EnergyEV);
             }
-
-            printf(">");
+            if (PowerMeasured > 0) {
+                printf("EV_POWER_W: %li\n", PowerMeasured);
+            }
             break;
         case MENU_CONFIG:
             printf("Configuration : %s\nEnter new Configuration (FIXED/SOCKET): ", getMenuItemOption(menu));
@@ -2000,8 +2028,8 @@ void UpdateCurrentData(void) {
             SetCurrent(Balanced[0]);
         }
 #ifdef LOG_DEBUG_EVSE
-        printf("\nSTATE: %c Error: %u StartCurrent: -%i ImeasuredNegative: %.1f A ChargeDelay: %u SolarStopTimer: %u NoCurrent: %u Imeasured: %.1f A IsetBalanced: %.1f A", State +'A', Error, StartCurrent,
-                                                                        (double)ImeasuredNegative/10, ChargeDelay, SolarStopTimer,  NoCurrent,
+        printf("\nError: %u StartCurrent: -%i ImeasuredNegative: %.1f A ChargeDelay: %u SolarStopTimer: %u NoCurrent: %u Imeasured: %.1f A IsetBalanced: %.1f A",
+                    Error, StartCurrent, (double)ImeasuredNegative/10, ChargeDelay, SolarStopTimer,  NoCurrent, (double)Imeasured/10, (double)IsetBalanced/10);
                                                                         (double)Imeasured/10,
                                                                         (double)IsetBalanced/10);
 
@@ -2016,10 +2044,9 @@ void main(void) {
     unsigned char pilot, count = 0, timeout = 5;
     unsigned char DiodeCheck = 0, ActivationMode = 0, ActivationTimer = 0;
     unsigned char Broadcast = 1, RB2count = 0, RB2last = 1;
-    signed long CM[3]={0, 0, 0};
-    signed long PV[3]={0, 0, 0};
+    signed long CM[3]={0, 0, 0}; // Current Mains Meter (I)
+    signed long PV[3]={0, 0, 0}; // PV Meter (I)
     unsigned char PollEVNode = NR_EVSES;
-    signed long EnergyEV = 0;
     unsigned long RB2Timer = 0;                                                 // 1500ms
     unsigned char ResetKwh = 2;                                                 // if set, reset EV kwh meter at state transition B->C
                                                                                 // cleared when charging, reset to 1 when disconnected (state A)
@@ -2273,7 +2300,7 @@ void main(void) {
                         {
                             if ((Error == NO_ERROR) && (ChargeDelay == 0)) {
                                 if (EVMeter && ResetKwh) {
-                                    EnergyMeterStart = EnergyEV;                // store kwh measurement at start of charging.
+                                    EnergyMeterStart = EnergyEV;                // store Wh measurement at start of charging.
                                     ResetKwh = 0;                               // clear flag, will be set when disconnected from EVSE (State A)
                                 }
                                 if (LoadBl > 1)                                 // Load Balancing : Node
@@ -2408,6 +2435,7 @@ void main(void) {
 
             Temp();                                                             // once a second, measure temperature
 
+            // printf("\nSTATE: %c\n", State +'A');                                  // Print the current J1772 state
 //            printf("locktimer: %lu timer: %lu\n lockstatus: %u", locktimer, Timer, lockstatus);
 
             CheckRFID();
@@ -2487,7 +2515,7 @@ void main(void) {
                     ModbusRequest = 1;                                          // Start with state 1
                 } else {                                                        // Normal mode
                     Imeasured = 0;                                              // No measurements, so we set it to zero
-                    ModbusRequest = 6;                                          // Start with state 5 (poll Nodes)
+                    ModbusRequest = 1;                                          // Start with state 1 (request meter measurements)
                     timeout = 10;                                               // reset timeout counter (not checked for Master)
                 }
                 Broadcast = 1;                                                  // repeat every two seconds
@@ -2504,12 +2532,25 @@ void main(void) {
             switch (ModbusRequest++) {                                          // State
                 case 1:                                                         // PV kwh meter
                     if (PVMeter) {
+#ifdef LOG_INFO_MODBUS
+                        printf(": Request Current PV %u", PVMeter);
+#endif
                         requestCurrentMeasurement(PVMeter, PVMeterAddress);
                         break;
                     }
                     ModbusRequest++;
                 case 2:                                                         // Sensorbox or kWh meter that measures -all- currents
-                    requestCurrentMeasurement(MainsMeter, MainsMeterAddress);
+                    if (MainsMeter) {
+#ifdef LOG_INFO_MODBUS
+                        printf(": Request Current Mains %u", MainsMeter);
+#endif
+                        requestCurrentMeasurement(MainsMeter, MainsMeterAddress);
+                    } else if (EVMeter) {
+#ifdef LOG_INFO_MODBUS
+                        printf(": Request Current EV %u", EVMeter);
+#endif
+                        requestCurrentMeasurement(EVMeter, EVMeterAddress);
+                    }
                     break;
                 case 3:
                     // Find next online SmartEVSE
@@ -2534,7 +2575,7 @@ void main(void) {
                     // Request Energy if EV meter is configured
                     if (Node[PollEVNode].EVMeter) {
 #ifdef LOG_INFO_MODBUS
-                        printf(": Request Energy Node %u", PollEVNode);
+                        printf(": Request EV meter Energy Node %u", PollEVNode);
 #endif
                         requestEnergyMeasurement(Node[PollEVNode].EVMeter, Node[PollEVNode].EVAddress);
                         break;
@@ -2543,6 +2584,9 @@ void main(void) {
                 case 5:                                                         // EV kWh meter, Power measurement (momentary power in Watt)
                     // Request Power if EV meter is configured
                     if (Node[PollEVNode].EVMeter) {
+#ifdef LOG_INFO_MODBUS
+                        printf(": Request EV meter Power Node %u", PollEVNode);
+#endif
                         requestPowerMeasurement(Node[PollEVNode].EVMeter, Node[PollEVNode].EVAddress);
                         break;
                     }
@@ -2607,10 +2651,16 @@ void main(void) {
                     case 0x04: // (Read input register)
                         if (PVMeter && Modbus.Address == PVMeterAddress && Modbus.Register == EMConfig[PVMeter].IRegister) {
                             // packet from PV electric meter
+#ifdef LOG_INFO_MODBUS
+                        printf(": Received Current PV %u", PVMeter);
+#endif
                             receiveCurrentMeasurement(Modbus.Data, PVMeter, PV);
 
                         } else if (Modbus.Address == MainsMeterAddress && Modbus.Register == EMConfig[MainsMeter].IRegister) {
                             // packet from Mains electric meter
+#ifdef LOG_INFO_MODBUS
+                        printf(": Received Current Mains %u", MainsMeter);
+#endif
                             x = receiveCurrentMeasurement(Modbus.Data, MainsMeter, CM);
                             if (x && LoadBl <2) timeout = 10;                   // only reset timeout when data is ok, and Master/Disabled
 
@@ -2623,14 +2673,29 @@ void main(void) {
                                 Isum = Isum + Irms[x];                          // Isum has a resolution of 100mA
                             }
 
-                        } else if (EVMeter && Modbus.Address == EVMeterAddress && Modbus.Register == EMConfig[EVMeter].ERegister) {
-                            // packet from EV kWh meter
-                            EnergyEV = receiveEnergyMeasurement(Modbus.Data, EVMeter);
-                            if (ResetKwh == 2) EnergyMeterStart = EnergyEV;     // At powerup, set EnergyEV to kwh meter value
-                            EnergyCharged = EnergyEV - EnergyMeterStart;        // Calculate Energy
-                        } else if (EVMeter && Modbus.Address == EVMeterAddress && Modbus.Register == EMConfig[EVMeter].PRegister) {
-                            // packet from EV kWh meter
-                            PowerMeasured = receivePowerMeasurement(Modbus.Data, EVMeter);
+                        } else if (EVMeter && Modbus.Address == EVMeterAddress) {
+                            if (Modbus.Register == EMConfig[EVMeter].ERegister) {
+                                // packet from EV kWh meter
+#ifdef LOG_INFO_MODBUS
+                                printf(": Received EV meter Energy Node %u", PollEVNode);
+#endif
+                                EnergyEV = receiveEnergyMeasurement(Modbus.Data, EVMeter);
+                                if (ResetKwh == 2) EnergyMeterStart = EnergyEV;     // At powerup, set EnergyEV to Wh meter value
+                                EnergyCharged = EnergyEV - EnergyMeterStart;        // Calculate Energy
+                            } else if (Modbus.Register == EMConfig[EVMeter].PRegister) {
+                                // packet from EV kWh meter
+#ifdef LOG_INFO_MODBUS
+                                printf(": Received EV meter Power Node %u", PollEVNode);
+#endif
+                                PowerMeasured = receivePowerMeasurement(Modbus.Data, EVMeter);
+                            } else if (Modbus.Register == EMConfig[EVMeter].IRegister) {
+                                // packet from EV kWh meter
+#ifdef LOG_INFO_MODBUS
+                                printf(": Received EV meter Current Node %u", PollEVNode);
+#endif
+                                x = receiveCurrentMeasurement(Modbus.Data, EVMeter, I_EV);
+                                if (x && LoadBl <2) timeout = 10;                   // only reset timeout when data is ok, and Master/Disabled
+                            }
                         }  else if (Modbus.Address > 1 && Modbus.Address <= NR_EVSES && Modbus.Register == 0x0000) {
                             // Status packet from Node EVSE received
                             receiveNodeStatus(Modbus.Data, Modbus.Address - 1);

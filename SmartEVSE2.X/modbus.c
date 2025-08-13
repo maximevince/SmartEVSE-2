@@ -673,6 +673,16 @@ unsigned char receiveCurrentMeasurement(unsigned char *buf, unsigned char Meter,
             break;
         }
 
+        case EM_BG_ETECH_WS100:
+            // Single phase meter, so only 1 Current value
+            var[0] = receiveMeasurement(buf, 0,
+                        EMConfig[Meter].Endianness,
+                        EMConfig[Meter].DataType,
+                        EMConfig[Meter].IDivisor - 3);
+            var[1] = 0;
+            var[2] = 0;
+            break;
+
         default:
             for (x = 0; x < 3; x++) {
                 var[x] = receiveMeasurement(buf,
