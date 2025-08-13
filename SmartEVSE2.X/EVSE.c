@@ -1579,7 +1579,6 @@ void RS232cli(void) {
                 printf("\n");
             }
             printf("\n>");
-            return;
         }
 
         for(i = 0; i < MenuItemsCount - 1; i++) {
@@ -1599,8 +1598,9 @@ void RS232cli(void) {
         }
 
 
-    } else if (U2buffer[0] == 0) menu = 0;
-    else {
+    } else if (U2buffer[0] == 0) {
+        menu = 0;
+    } else {
         switch (menu) {
             case MENU_CAL:
                 x = 0;
@@ -1733,13 +1733,14 @@ void RS232cli(void) {
         case 0:
             // Show status only
             printf("\n");
+            printf("LOADBL: %s\n", getMenuItemOption(MENU_LOADBL));
+            printf("MODE: %s\n", getMenuItemOption(MENU_MODE));
             printf("STATE: %c\n", State +'A');
+            printf("MAX: %u\n", MaxCurrent);
             printf("EV_CURRENT_MA: %li, %li, %li\n", I_EV[0], I_EV[1], I_EV[2]);
+            printf("EV_POWER_W: %li\n", PowerMeasured);
             if (EnergyEV > 0) {
                 printf("EV_ENERGY_WH: %li\n", EnergyEV);
-            }
-            if (PowerMeasured > 0) {
-                printf("EV_POWER_W: %li\n", PowerMeasured);
             }
             break;
         case MENU_CONFIG:
