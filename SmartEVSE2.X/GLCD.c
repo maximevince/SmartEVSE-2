@@ -555,8 +555,8 @@ void GLCD(void) {
                         GLCD_print_buf2(4, (const char *) "RFID CARD");
                     }
                 } else {
-                    GLCD_print_buf2(2, (const char *) "ACCESS");
-                    GLCD_print_buf2(4, (const char *) "DENIED");
+                    GLCD_print_buf2(2, (const char *) "CHARGER");
+                    GLCD_print_buf2(4, (const char *) "DISABLED");
                 }
             }
         }
@@ -1065,7 +1065,7 @@ void GLCD_init(void) {
 void GLCD_version(void) {
     glcd_clear();                                                               // Clear whole display
     GLCD_print_buf2(2, (const char *) "Smart EVSE");
-    GLCD_print_buf2(4, (const char *) "Ver "VERSION);
+    GLCD_print_buf2(4, (const char *) " v"VERSION);
 
     delay(2000);                                                                // show version for 2 seconds
 }

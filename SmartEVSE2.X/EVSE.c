@@ -1596,6 +1596,14 @@ void RS232cli(void) {
             write_settings();
             Error = NO_ERROR; // Clear Errors
         }
+        else if (strcmp(U2buffer, (const char *) "ACCESS 1") == 0 ) {           // shortcut to enable access
+            Access_bit = 1;
+            printf("Access enabled\n");
+        }
+        else if (strcmp(U2buffer, (const char *) "ACCESS 0") == 0 ) {           // shortcut to disable access
+            Access_bit = 0;
+            printf("Access disabled\n");
+        }
 
 
     } else if (U2buffer[0] == 0) {
@@ -1737,6 +1745,7 @@ void RS232cli(void) {
             printf("MODE: %s\n", getMenuItemOption(MENU_MODE));
             printf("STATE: %c\n", State +'A');
             printf("MAX: %u\n", MaxCurrent);
+            printf("ACCESS: %s\n", Access_bit ? "ENABLED" : "DISABLED");
             printf("EV_CURRENT_MA: %li, %li, %li\n", I_EV[0], I_EV[1], I_EV[2]);
             printf("EV_POWER_W: %li\n", PowerMeasured);
             if (EnergyEV > 0) {
@@ -2236,7 +2245,7 @@ void main(void) {
                 NextState = NOSTATE;
                 if (!ResetKwh) ResetKwh = 1;                                    // when set, reset EV kWh meter on state B->C change.
             } else if ( (pilot == PILOT_9V || pilot == STATE_A_TO_C)
-                && Error == NO_ERROR && ChargeDelay == 0 && Access_bit
+                && Error == NO_ERROR && ChargeDelay == 0 // && Access_bit       // Do not check Access_bit here, it will be checked in State B
                 && State != STATE_COMM_B) {                                     // switch to State B ?
                                                                                 // Allow to switch to state C directly if STATE_A_TO_C is set to PILOT_6V (see EVSE.h)
                 if (NextState == STATE_B)                                       // Access is permitted when Access_bit set
@@ -2296,7 +2305,10 @@ void main(void) {
                         count = 0;
                     }
                 } else if (pilot == PILOT_6V) {
-                    if ((NextState == STATE_C) && (DiodeCheck == 1)) {
+                    if (!Access_bit) {
+                        // do nothing, stay in State B
+                        count = 0;
+                    } else if ((NextState == STATE_C) && (DiodeCheck == 1)) {
                         if (count++ > 25)                                       // repeat 25 times (changed in v2.05)
                         {
                             if ((Error == NO_ERROR) && (ChargeDelay == 0)) {
@@ -2379,6 +2391,7 @@ void main(void) {
             if ((TMR2 > 7) && (TMR2 < 24))                                      // cycle 3% - 9% (should be high)
             {
                 pilot = ReadPilot();
+
                 if ((pilot == PILOT_12V) || (pilot == PILOT_NOK))               // Disconnected or Error?
                 {
                     if (NextState == STATE_A) {
@@ -2394,7 +2407,7 @@ void main(void) {
                         NextState = STATE_A;
                         count = 0;
                     }
-                } else if (pilot == PILOT_9V) {
+                } else if (pilot == PILOT_9V || !Access_bit) {                  // PILOT_9V or Access_bit is 0 -> Back to State B
                     if (NextState == STATE_B) {
                         if (count++ > 25)                                       // repeat 25 times
                         {
